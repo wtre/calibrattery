@@ -148,7 +148,8 @@ def main(args, ITE=0):
 
     for _ite in range(args.start_iter, ITERATION):
         if not _ite == 0:
-            prune_by_percentile(args.prune_percent, resample=resample, reinit=reinit, layerwise=layerwise)
+            prune_by_percentile(args.prune_percent, args.fc_prune_percent, resample=resample,
+                                reinit=reinit, layerwise=layerwise, if_split=args.split_conv_and_fc)
             if reinit:
                 model.apply(weight_init)
                 #if args.arch_type == "fc1":
@@ -297,49 +298,82 @@ def test(model, test_loader, criterion):
     return accuracy
 
 # Prune by Percentile module
-def prune_by_percentile(percent, resample=False, reinit=False, layerwise=False, **kwargs):
+def prune_by_percentile(percent, fc_percent, resample=False, reinit=False, layerwise=False, if_split=True, **kwargs):
         global step
         global mask
         global model
 
         # Calculate percentile value
         step = 0
-        if layerwise:
-            for name, param in model.named_parameters():
+        if if_split:
+            # i won't implement split & layerwise case for now, it's useless
 
-                # We do not prune bias term
-                if 'weight' in name:
-                    tensor = param.data.cpu().numpy()
-                    alive = tensor[np.nonzero(tensor)] # flattened array of nonzero values
-                    percentile_value = np.percentile(abs(alive), percent)
-
-                    # Convert Tensors to numpy and calculate
-                    weight_dev = param.device
-                    new_mask = np.where(abs(tensor) < percentile_value, 0, mask[step])
-
-                    # Apply new weight and mask
-                    param.data = torch.from_numpy(tensor * new_mask).to(weight_dev)
-                    mask[step] = new_mask
-                    step += 1
-        else:
-            alive = np.empty(shape=0)    # init 0d array
+            # split % global case
+            alive_conv = np.empty(shape=0)
+            alive_fc = np.empty(shape=0)  # init 0d array
             for name, param in model.named_parameters():
                 if 'weight' in name:
                     tensor = param.data.cpu().numpy()
-                    alive = np.concatenate((alive,tensor[np.nonzero(tensor)]))  # flattened array of nonzero values
-            percentile_value = np.percentile(abs(alive), percent)
+                    if 'features' in name:
+                        alive_conv = np.concatenate((alive_conv, tensor[np.nonzero(tensor)]))
+                    elif 'classifier' in name:
+                        alive_fc = np.concatenate((alive_fc, tensor[np.nonzero(tensor)]))
+            conv_percentile_value = np.percentile(abs(alive_conv), percent)
+            fc_percentile_value = np.percentile(abs(alive_fc), fc_percent)
+            # print(f'>> conv threshold : {conv_percentile_value:15} (cut from {percent:3}%) | fc threshold : {fc_percentile_value:15} (cut from {fc_percent:3}%)')
 
             # Convert Tensors to numpy and calculate
             for name, param in model.named_parameters():
                 if 'weight' in name:
                     tensor = param.data.cpu().numpy()
                     weight_dev = param.device
-                    new_mask = np.where(abs(tensor) < percentile_value, 0, mask[step])
+                    if 'features' in name:
+                        new_mask = np.where(abs(tensor) < conv_percentile_value, 0, mask[step])
+                    elif 'classifier' in name:
+                        new_mask = np.where(abs(tensor) < fc_percentile_value, 0, mask[step])
 
                     # Apply new weight and mask
                     param.data = torch.from_numpy(tensor * new_mask).to(weight_dev)
                     mask[step] = new_mask
                     step += 1
+
+        else:   # use single threshold for pruning conv and FC.
+            if layerwise:
+                for name, param in model.named_parameters():
+
+                    # We do not prune bias term
+                    if 'weight' in name:
+                        tensor = param.data.cpu().numpy()
+                        alive = tensor[np.nonzero(tensor)] # flattened array of nonzero values
+                        percentile_value = np.percentile(abs(alive), percent)
+
+                        # Convert Tensors to numpy and calculate
+                        weight_dev = param.device
+                        new_mask = np.where(abs(tensor) < percentile_value, 0, mask[step])
+
+                        # Apply new weight and mask
+                        param.data = torch.from_numpy(tensor * new_mask).to(weight_dev)
+                        mask[step] = new_mask
+                        step += 1
+            else:
+                alive = np.empty(shape=0)    # init 0d array
+                for name, param in model.named_parameters():
+                    if 'weight' in name:
+                        tensor = param.data.cpu().numpy()
+                        alive = np.concatenate((alive,tensor[np.nonzero(tensor)]))  # flattened array of nonzero values
+                percentile_value = np.percentile(abs(alive), percent)
+
+                # Convert Tensors to numpy and calculate
+                for name, param in model.named_parameters():
+                    if 'weight' in name:
+                        tensor = param.data.cpu().numpy()
+                        weight_dev = param.device
+                        new_mask = np.where(abs(tensor) < percentile_value, 0, mask[step])
+
+                        # Apply new weight and mask
+                        param.data = torch.from_numpy(tensor * new_mask).to(weight_dev)
+                        mask[step] = new_mask
+                        step += 1
         step = 0
 
 # Function to make an empty mask of the same size as the model
@@ -465,6 +499,8 @@ if __name__=="__main__":
     parser.add_argument("--early_stopping", action="store_true", help="Split validation set to measure early stopping point")
     parser.add_argument("--valid_size", default=0.1, type=float, help="Size of validation set")
     parser.add_argument("--prune_scope", default="global", type=str, help="global | layerwise")
+    parser.add_argument("--split_conv_and_fc", action="store_true", help="use separate prune rate for FC layer")
+    parser.add_argument("--fc_prune_percent", default=10, type=int, help="Used only when --split_conv_and_fc==True")
 
     
     args = parser.parse_args()
