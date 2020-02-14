@@ -17,5 +17,5 @@ Here's an example argument set.
 --split_conv_and_fc
 --fc_prune_percent=20
 ```
-For now there's a weird bug that makes every `#param-testacc` graph identical when trying experiments multiple time.
-I think it's due to saving/loading mechanism from original repo, i should fix asap.
+For now there's a weird bug that makes every `#param-testacc` graph ~~identical~~ kinda same in terms of shape when trying experiments multiple time.
+I think it could be a saving/loading mechanism from original repo, i should fix asap. (or test with other params?)
