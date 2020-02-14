@@ -3,3 +3,6 @@
 /plots
 /runs
 /saves
+/.idea
+/.pytest_cache/v/cache
+/__pycache__
