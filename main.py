@@ -38,14 +38,15 @@ def main(args, ITE=0):
 
     # Data Loader
     transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,))])
+    transform_cifar10 = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
     if args.dataset == "mnist":
         traindataset = datasets.MNIST('../data', train=True, download=True,transform=transform)
         testdataset = datasets.MNIST('../data', train=False, transform=transform)
         from archs.mnist import AlexNet, LeNet5, fc1, vgg, resnet
 
     elif args.dataset == "cifar10":
-        traindataset = datasets.CIFAR10('../data', train=True, download=True,transform=transform)
-        testdataset = datasets.CIFAR10('../data', train=False, transform=transform)      
+        traindataset = datasets.CIFAR10('../data', train=True, download=True,transform=transform_cifar10)
+        testdataset = datasets.CIFAR10('../data', train=False, transform=transform_cifar10)
         from archs.cifar10 import AlexNet, LeNet5, fc1, vgg, resnet, densenet, minivgg
 
     elif args.dataset == "fashionmnist":
@@ -64,24 +65,33 @@ def main(args, ITE=0):
         print("\nWrong Dataset choice \n")
         exit()
 
-
     # obtain training indices that will be used for validation
     if args.early_stopping:
-        num_train = len(traindataset)
-        indices = list(range(num_train))
-        np.random.shuffle(indices)
-        split = int(np.floor(args.valid_size * num_train))
-        train_idx, valid_idx = indices[split:], indices[:split]
+        print(' Splitting Validation sets ')
+        # num_train = len(traindataset)
+        # indices = list(range(num_train))
+        # np.random.shuffle(indices)
+        # split = int(np.floor(args.valid_size * num_train))
+        # train_idx, valid_idx = indices[split:], indices[:split]
+        #
+        # # define samplers for obtaining training and validation batches
+        # train_sampler = SubsetRandomSampler(train_idx)
+        # valid_sampler = SubsetRandomSampler(valid_idx)
+        # train_loader = torch.utils.data.DataLoader(traindataset, batch_size=args.batch_size, shuffle=True,
+        #                                            num_workers=0, sampler=train_sampler, drop_last=False)
+        # valid_loader = torch.utils.data.DataLoader(traindataset, batch_size=args.batch_size, shuffle=True,
+        #                                            num_workers=0, sampler=valid_sampler, drop_last=False)
+        trainset_size = int((1 - args.valid_size) * len(traindataset))
+        valset_size = len(traindataset) - trainset_size
+        trainset, valset = torch.utils.data.random_split(traindataset, [trainset_size, valset_size])
 
-        # define samplers for obtaining training and validation batches
-        train_sampler = SubsetRandomSampler(train_idx)
-        valid_sampler = SubsetRandomSampler(valid_idx)
-        train_loader = torch.utils.data.DataLoader(traindataset, batch_size=args.batch_size, shuffle=True,
-                                                   num_workers=0, sampler=train_sampler, drop_last=False)
-        valid_loader = torch.utils.data.DataLoader(traindataset, batch_size=args.batch_size, shuffle=True,
-                                                   num_workers=0, sampler=valid_sampler, drop_last=False)
+        train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=0,
+                                                  drop_last=False)
+        valid_loader = torch.utils.data.DataLoader(valset, batch_size=args.batch_size, shuffle=True, num_workers=0,
+                                                  drop_last=False)
 
     else:
+        print(' Eww, no validation set? ')
         train_loader = torch.utils.data.DataLoader(traindataset, batch_size=args.batch_size, shuffle=True, num_workers=0,drop_last=False)
 
     # train_loader = cycle(train_loader)
@@ -147,6 +157,10 @@ def main(args, ITE=0):
     all_accuracy = np.zeros(args.end_iter,float)
 
     for _ite in range(args.start_iter, ITERATION):
+
+        # Early stopping parameter for each pruning iteration
+        early_stopping = EarlyStopping(patience=8, verbose=True)
+
         if not _ite == 0:
             prune_by_percentile(args.prune_percent, args.fc_prune_percent, resample=resample,
                                 reinit=reinit, layerwise=layerwise, if_split=args.split_conv_and_fc)
@@ -200,11 +214,22 @@ def main(args, ITE=0):
             loss = train(model, train_loader, optimizer, criterion)
             all_loss[iter_] = loss
             all_accuracy[iter_] = accuracy
+
+            valid_loss = validate(model, valid_loader, optimizer, criterion)
             
             # Frequency for Printing Accuracy and Loss
             if iter_ % args.print_freq == 0:
                 pbar.set_description(
-                    f'Train Epoch: {iter_}/{args.end_iter} Loss: {loss:.6f} Accuracy: {accuracy:.2f}% Best Accuracy: {best_accuracy:.2f}%')       
+                    f'Train Epoch: {iter_}/{args.end_iter} Loss: {loss:.6f} Accuracy: {accuracy:.2f}% Best Accuracy: {best_accuracy:.2f}%')
+                if()
+                    print('')
+
+            # early stopping
+            early_stopping(valid_loss, model)
+            if early_stopping.early_stop:
+                print("Early stopping")
+                break
+
 
         writer.add_scalar('Accuracy/test', best_accuracy, comp1)
         bestacc[_ite]=best_accuracy
@@ -259,16 +284,25 @@ def main(args, ITE=0):
    
 # Function for Training
 def train(model, train_loader, optimizer, criterion):
-    EPS = 1e-6
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    running_loss = 0.0
+
+    train_losses = []
+    EPS = 1e-8
     model.train()
-    for batch_idx, (imgs, targets) in enumerate(train_loader):
+    for i, (inputs, labels) in enumerate(train_loader):
+        # get the inputs; data is a list of [inputs, labels]
+        inputs, labels = inputs.to(device), labels.to(device)
+
+        # zero the parameter gradients
         optimizer.zero_grad()
-        #imgs, targets = next(train_loader)
-        imgs, targets = imgs.to(device), targets.to(device)
-        output = model(imgs)
-        train_loss = criterion(output, targets)
-        train_loss.backward()
+
+        # forward + backward + optimize
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
 
         # Freezing Pruned weights by making their gradients Zero
         for name, p in model.named_parameters():
@@ -278,7 +312,56 @@ def train(model, train_loader, optimizer, criterion):
                 grad_tensor = np.where(tensor < EPS, 0, grad_tensor)
                 p.grad.data = torch.from_numpy(grad_tensor).to(device)
         optimizer.step()
-    return train_loss.item()
+
+    return loss.item()
+
+
+    # EPS = 1e-6
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # model.train()
+    # for batch_idx, (imgs, targets) in enumerate(train_loader):
+    #     optimizer.zero_grad()
+    #     #imgs, targets = next(train_loader)
+    #     imgs, targets = imgs.to(device), targets.to(device)
+    #     output = model(imgs)
+    #     train_loss = criterion(output, targets)
+    #     train_loss.backward()
+    #
+    #     # Freezing Pruned weights by making their gradients Zero
+    #     for name, p in model.named_parameters():
+    #         if 'weight' in name:
+    #             tensor = p.data.cpu().numpy()
+    #             grad_tensor = p.grad.data.cpu().numpy()
+    #             grad_tensor = np.where(tensor < EPS, 0, grad_tensor)
+    #             p.grad.data = torch.from_numpy(grad_tensor).to(device)
+    #     optimizer.step()
+    # return train_loss.item()
+
+# Function for Vadlidating
+def validate(model, valid_loader, optimizer, criterion):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    valid_losses = []
+    model.eval()
+    for i, (inputs, labels) in enumerate(valid_loader):
+        # get the inputs; data is a list of [inputs, labels]
+        inputs, labels = inputs.to(device), labels.to(device)
+
+        # zero the parameter gradients
+        optimizer.zero_grad()
+
+        # forward + backward + optimize
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+
+    valid_losses.append(loss.item())
+    valid_loss = np.average(valid_losses)
+
+    return valid_loss
+
+
 
 # Function for Testing
 def test(model, test_loader, criterion):
