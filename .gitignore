@@ -6,3 +6,6 @@
 /.idea
 /.pytest_cache/v/cache
 /__pycache__
+/.pt
+/.pth
+
