@@ -4,6 +4,9 @@
 import numpy as np
 import torch
 
+# additional imports
+import utils
+
 
 class EarlyStopping:
     """Early stops the training if validation loss doesn't improve after a given patience."""
@@ -25,26 +28,34 @@ class EarlyStopping:
         self.val_loss_min = np.Inf
         self.delta = delta
 
-    def __call__(self, val_loss, model):
+    def __call__(self, val_loss, model, cpath, spath):
 
         score = -val_loss
 
         if self.best_score is None:
             self.best_score = score
-            self.save_checkpoint(val_loss, model)
+            msg = self.save_checkpoint(val_loss, model, cpath, spath)
         elif score < self.best_score + self.delta:
             self.counter += 1
-            print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
+            msg = f'EarlyStop {self.counter}/{self.patience}'
             if self.counter >= self.patience:
                 self.early_stop = True
         else:
             self.best_score = score
-            self.save_checkpoint(val_loss, model)
+            msg = self.save_checkpoint(val_loss, model, cpath, spath)
             self.counter = 0
 
-    def save_checkpoint(self, val_loss, model):
+        return msg
+
+    def save_checkpoint(self, val_loss, model, cpath, spath):
         '''Saves model when validation loss decrease.'''
+        msg = ""
         if self.verbose:
-            print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
-        torch.save(model.state_dict(), 'checkpoint.pt')
+            msg = f'saved (VLoss {self.val_loss_min:.4f}->{val_loss:.4f})'
+
+        # torch.save(model.state_dict(), 'checkpoint.pt')
+        utils.checkdir(cpath)
+        torch.save(model, spath)
+
         self.val_loss_min = val_loss
+        return msg

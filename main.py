@@ -23,6 +23,7 @@ from pytorchtools import EarlyStopping
 
 # Custom Libraries
 import utils
+import time
 
 # Tensorboard initialization
 writer = SummaryWriter()
@@ -32,6 +33,10 @@ sns.set_style('darkgrid')
 
 # Main
 def main(args, ITE=0):
+    import pandas as pd
+    pd.set_option('display.width', 400)
+    pd.set_option('display.max_columns', 10)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     reinit = True if args.prune_type=="reinit" else False
     layerwise = True if args.prune_type == "layerwise" else False
@@ -154,12 +159,13 @@ def main(args, ITE=0):
     bestacc = np.zeros(ITERATION,float)
     step = 0
     all_loss = np.zeros(args.end_iter,float)
+    all_vloss = np.zeros(args.end_iter, float)
     all_accuracy = np.zeros(args.end_iter,float)
 
     for _ite in range(args.start_iter, ITERATION):
 
         # Early stopping parameter for each pruning iteration
-        early_stopping = EarlyStopping(patience=8, verbose=True)
+        early_stopping = EarlyStopping(patience=99, verbose=True) ######### we don't stop, party all night
 
         if not _ite == 0:
             prune_by_percentile(args.prune_percent, args.fc_prune_percent, resample=resample,
@@ -191,6 +197,8 @@ def main(args, ITE=0):
             else:
                 original_initialization(mask, initial_state_dict)
             optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
+
+        time.sleep(0.25)
         print(f"\n--- Pruning Level [{ITE}:{_ite}/{ITERATION}]: ---")
 
         # Print the table of Nonzeros in each layer
@@ -198,6 +206,7 @@ def main(args, ITE=0):
         comp[_ite] = comp1
         pbar = tqdm(range(args.end_iter))
 
+        stop_flag = False
         for iter_ in pbar:
 
             # Frequency for Testing
@@ -207,28 +216,35 @@ def main(args, ITE=0):
                 # Save Weights
                 if accuracy > best_accuracy:
                     best_accuracy = accuracy
-                    utils.checkdir(f"{os.getcwd()}/saves/{args.arch_type}/{args.dataset}/")
-                    torch.save(model,f"{os.getcwd()}/saves/{args.arch_type}/{args.dataset}/{_ite}_model_{args.prune_type}.pth.tar")
+                    # We don't save model per test-acc, will use validation-acc!
+                    # utils.checkdir(f"{os.getcwd()}/saves/{args.arch_type}/{args.dataset}/")
+                    # torch.save(model,f"{os.getcwd()}/saves/{args.arch_type}/{args.dataset}/{_ite}_model_{args.prune_type}.pth.tar")
 
             # Training
             loss = train(model, train_loader, optimizer, criterion)
             all_loss[iter_] = loss
             all_accuracy[iter_] = accuracy
 
-            valid_loss = validate(model, valid_loader, optimizer, criterion)
-            
-            # Frequency for Printing Accuracy and Loss
-            if iter_ % args.print_freq == 0:
-                pbar.set_description(
-                    f'Train Epoch: {iter_}/{args.end_iter} Loss: {loss:.6f} Accuracy: {accuracy:.2f}% Best Accuracy: {best_accuracy:.2f}%')
-                if()
-                    print('')
+            # Validating
+            valid_loss, loss_v = validate(model, valid_loader, optimizer, criterion)
+            all_vloss[iter_] = loss_v
 
             # early stopping
-            early_stopping(valid_loss, model)
-            if early_stopping.early_stop:
+            checkpoint_path = f"{os.getcwd()}/saves/{args.arch_type}/{args.dataset}/"
+            save_path = f"{os.getcwd()}/saves/{args.arch_type}/{args.dataset}/{_ite}_model_{args.prune_type}.pth.tar"
+            msg = early_stopping(valid_loss, model, checkpoint_path, save_path)
+
+            # Frequency for Printing Accuracy and Loss
+            if iter_ % args.print_freq == 0:
+                time.sleep(0.25)
+                pbar.set_description(
+                    # f'Train Epoch: {iter_}/{args.end_iter} Loss: {loss:.6f} Accuracy: {accuracy:.2f}% Best Accuracy: {best_accuracy:.2f}% \t' + msg)
+                    f'Train Epoch: {iter_}/{args.end_iter} Loss: {loss:.6f} Accuracy: {accuracy:.2f}% Best Accuracy: {best_accuracy:.2f}%')
+
+            if early_stopping.early_stop and not stop_flag:
                 print("Early stopping")
-                break
+                stop_flag = True
+                # break
 
 
         writer.add_scalar('Accuracy/test', best_accuracy, comp1)
@@ -237,7 +253,8 @@ def main(args, ITE=0):
         # Plotting Loss (Training), Accuracy (Testing), Iteration Curve
         #NOTE Loss is computed for every iteration while Accuracy is computed only for every {args.valid_freq} iterations. Therefore Accuracy saved is constant during the uncomputed iterations.
         #NOTE Normalized the accuracy to [0,100] for ease of plotting.
-        plt.plot(np.arange(1,(args.end_iter)+1), 100*(all_loss - np.min(all_loss))/np.ptp(all_loss).astype(float), c="blue", label="Loss") 
+        plt.plot(np.arange(1,(args.end_iter)+1), 100*(all_loss - np.min(all_loss))/np.ptp(all_loss).astype(float), c="blue", label="Loss")
+        plt.plot(np.arange(1, (args.end_iter) + 1), 100 * (all_vloss - np.min(all_vloss)) / np.ptp(all_vloss).astype(float), c="green", label="Loss")
         plt.plot(np.arange(1,(args.end_iter)+1), all_accuracy, c="red", label="Accuracy") 
         plt.title(f"Loss Vs Accuracy Vs Iterations ({args.dataset},{args.arch_type})") 
         plt.xlabel("Iterations") 
@@ -289,7 +306,7 @@ def train(model, train_loader, optimizer, criterion):
     running_loss = 0.0
 
     train_losses = []
-    EPS = 1e-8
+    EPS = 1e-9
     model.train()
     for i, (inputs, labels) in enumerate(train_loader):
         # get the inputs; data is a list of [inputs, labels]
@@ -302,7 +319,6 @@ def train(model, train_loader, optimizer, criterion):
         outputs = model(inputs)
         loss = criterion(outputs, labels)
         loss.backward()
-        optimizer.step()
 
         # Freezing Pruned weights by making their gradients Zero
         for name, p in model.named_parameters():
@@ -359,7 +375,7 @@ def validate(model, valid_loader, optimizer, criterion):
     valid_losses.append(loss.item())
     valid_loss = np.average(valid_losses)
 
-    return valid_loss
+    return valid_loss, loss.item()
 
 
 
@@ -411,9 +427,9 @@ def prune_by_percentile(percent, fc_percent, resample=False, reinit=False, layer
                     tensor = param.data.cpu().numpy()
                     weight_dev = param.device
                     if 'features' in name:
-                        new_mask = np.where(abs(tensor) < conv_percentile_value, 0, mask[step])
+                        new_mask = np.where(abs(tensor) <= conv_percentile_value, 0, mask[step])
                     elif 'classifier' in name:
-                        new_mask = np.where(abs(tensor) < fc_percentile_value, 0, mask[step])
+                        new_mask = np.where(abs(tensor) <= fc_percentile_value, 0, mask[step])
 
                     # Apply new weight and mask
                     param.data = torch.from_numpy(tensor * new_mask).to(weight_dev)

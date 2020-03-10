@@ -164,79 +164,81 @@ def main_two(args, ITE=0):
     avg_valid_losses = []
 
     # initialize the early_stopping object
-    early_stopping = EarlyStopping(patience=5, verbose=True)
+    for big_iter in range(10):
+        early_stopping = EarlyStopping(patience=2, verbose=True)
+        model = minivgg.conv6().to(device)
 
-    for epoch in range(40):  # loop over the dataset multiple times
+        for epoch in range(4):  # loop over the dataset multiple times
 
-        running_loss = 0.0
-        model.train()
-        for i, (inputs, labels) in enumerate(trainloader):
-            # get the inputs; data is a list of [inputs, labels]
-            inputs, labels = inputs.to(device), labels.to(device)
+            running_loss = 0.0
+            model.train()
+            for i, (inputs, labels) in enumerate(trainloader):
+                # get the inputs; data is a list of [inputs, labels]
+                inputs, labels = inputs.to(device), labels.to(device)
 
-            # zero the parameter gradients
-            optimizer.zero_grad()
+                # zero the parameter gradients
+                optimizer.zero_grad()
 
-            # forward + backward + optimize
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
+                # forward + backward + optimize
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+                loss.backward()
+                optimizer.step()
 
-            # print statistics
-            running_loss += loss.item()
-            if i % 200 == 199:    # print every 2000 mini-batches
-                print('    [%d, %5d] loss: %.5f' %
-                      (epoch + 1, i + 1, running_loss / 2000))
-                running_loss = 0.0
+                # print statistics
+                running_loss += loss.item()
+                if i % 200 == 199:    # print every 2000 mini-batches
+                    print('    [%d, %5d] loss: %.5f' %
+                          (epoch + 1, i + 1, running_loss / 2000))
+                    running_loss = 0.0
 
-            train_losses.append(loss.item())
+                train_losses.append(loss.item())
 
-        # Validate the model!!!
-        model.eval()
-        for inputs, labels in validloader:
-            inputs, labels = inputs.to(device), labels.to(device)
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            valid_losses.append(loss.item())
+            # Validate the model!!!
+            model.eval()
+            for inputs, labels in validloader:
+                inputs, labels = inputs.to(device), labels.to(device)
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+                valid_losses.append(loss.item())
 
-        # print training/validation statistics
-        # calculate average loss over an epoch
-        train_loss = np.average(train_losses)
-        valid_loss = np.average(valid_losses)
-        avg_train_losses.append(train_loss)
-        avg_valid_losses.append(valid_loss)
+            # print training/validation statistics
+            # calculate average loss over an epoch
+            train_loss = np.average(train_losses)
+            valid_loss = np.average(valid_losses)
+            avg_train_losses.append(train_loss)
+            avg_valid_losses.append(valid_loss)
 
-        print_msg = (f'[{epoch:2d}/40] ' +
-                     f'train_loss: {train_loss:.5f} ' +
-                     f'valid_loss: {valid_loss:.5f}')
+            print_msg = (f'[{epoch:2d}/40] ' +
+                         f'train_loss: {train_loss:.5f} ' +
+                         f'valid_loss: {valid_loss:.5f}')
 
-        print(print_msg)
+            print(print_msg)
 
-        # clear lists to track next epoch
-        train_losses = []
-        valid_losses = []
+            # clear lists to track next epoch
+            train_losses = []
+            valid_losses = []
 
-        # test loop!
-        correct = 0
-        total = 0
-        with torch.no_grad():
-            for data in testloader:
-                images, labels = data[0].to(device), data[1].to(device)
-                outputs = model(images)
-                _, predicted = torch.max(outputs.data, 1)
-                total += labels.size(0)
-                correct += (predicted == labels).sum().item()
+            # test loop!
+            correct = 0
+            total = 0
+            with torch.no_grad():
+                for data in testloader:
+                    images, labels = data[0].to(device), data[1].to(device)
+                    outputs = model(images)
+                    _, predicted = torch.max(outputs.data, 1)
+                    total += labels.size(0)
+                    correct += (predicted == labels).sum().item()
 
-        print(f'    Accuracy of the network on the 10000 test images: {100 * correct / total:2.2f} %')
+            print(f'    Accuracy of the network on the 10000 test images: {100 * correct / total:2.2f} %')
 
-        # early_stopping needs the validation loss to check if it has decresed,
-        # and if it has, it will make a checkpoint of the current model
-        early_stopping(valid_loss, model)
+            # early_stopping needs the validation loss to check if it has decresed,
+            # and if it has, it will make a checkpoint of the current model
+            early_stopping(valid_loss, model)
 
-        if early_stopping.early_stop:
-            print("Early stopping")
-            break
+            if early_stopping.early_stop:
+                print("Early stopping")
+                break
 
     print('Finished Training')
 
