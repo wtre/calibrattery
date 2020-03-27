@@ -55,8 +55,9 @@ import torch.optim as optim
 # libraries added
 import argparse
 import torchvision.datasets as datasets
+import os
 from torch.utils.data.sampler import SubsetRandomSampler
-from pytorchtools import EarlyStopping
+from pytorchtools import EarlyStopping_deprecated
 
 
 class Net(nn.Module):
@@ -107,10 +108,10 @@ def main_two(args, ITE=0):
     valset_size = len(trainvalset) - trainset_size
 
     trainset, valset = torch.utils.data.random_split(trainvalset, [trainset_size, valset_size])
-    testset = datasets.CIFAR10('../data', train=False, transform=transform)
+    testset = datasets.CIFAR10('../data', train=False, transform=transform)\
 
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=0, drop_last=False)
-    validloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=0, drop_last=False)
+    validloader = torch.utils.data.DataLoader(valset, batch_size=args.batch_size, shuffle=True, num_workers=0, drop_last=False)
     testloader = torch.utils.data.DataLoader(testset, batch_size=args.batch_size, shuffle=False, num_workers=0, drop_last=True)
 
 
@@ -138,7 +139,7 @@ def main_two(args, ITE=0):
     # 2. Define a Convolutional Neural Network
     # net = Net()
     from archs.cifar10 import minivgg
-    model = minivgg.conv6().to(device)
+    model = minivgg.conv4().to(device)
 
     ########################################################################
     # 3. Define a Loss function and optimizer
@@ -164,11 +165,11 @@ def main_two(args, ITE=0):
     avg_valid_losses = []
 
     # initialize the early_stopping object
-    for big_iter in range(10):
-        early_stopping = EarlyStopping(patience=2, verbose=True)
-        model = minivgg.conv6().to(device)
+    for big_iter in range(1):
+        early_stopping = EarlyStopping_deprecated(patience=99, verbose=True)
+        # model = minivgg.conv4().to(device)        ############# Reinit here if you need to reset ##############
 
-        for epoch in range(4):  # loop over the dataset multiple times
+        for epoch in range(33):  # loop over the dataset multiple times
 
             running_loss = 0.0
             model.train()

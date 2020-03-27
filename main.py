@@ -73,19 +73,6 @@ def main(args, ITE=0):
     # obtain training indices that will be used for validation
     if args.early_stopping:
         print(' Splitting Validation sets ')
-        # num_train = len(traindataset)
-        # indices = list(range(num_train))
-        # np.random.shuffle(indices)
-        # split = int(np.floor(args.valid_size * num_train))
-        # train_idx, valid_idx = indices[split:], indices[:split]
-        #
-        # # define samplers for obtaining training and validation batches
-        # train_sampler = SubsetRandomSampler(train_idx)
-        # valid_sampler = SubsetRandomSampler(valid_idx)
-        # train_loader = torch.utils.data.DataLoader(traindataset, batch_size=args.batch_size, shuffle=True,
-        #                                            num_workers=0, sampler=train_sampler, drop_last=False)
-        # valid_loader = torch.utils.data.DataLoader(traindataset, batch_size=args.batch_size, shuffle=True,
-        #                                            num_workers=0, sampler=valid_sampler, drop_last=False)
         trainset_size = int((1 - args.valid_size) * len(traindataset))
         valset_size = len(traindataset) - trainset_size
         trainset, valset = torch.utils.data.random_split(traindataset, [trainset_size, valset_size])
@@ -129,8 +116,8 @@ def main(args, ITE=0):
         print("\nWrong Model choice\n")
         exit()
 
-    # Weight Initialization
-    model.apply(weight_init)
+    # Weight Initialization. Warning! This drops test acc, examiniation needed.
+    # model.apply(weight_init)
 
     # Copying and Saving Initial State
     print('  saving initial model... ')
@@ -204,6 +191,8 @@ def main(args, ITE=0):
         # Print the table of Nonzeros in each layer
         comp1 = utils.print_nonzeros(model)
         comp[_ite] = comp1
+
+        # pbar = range(args.end_iter)
         pbar = tqdm(range(args.end_iter))
 
         stop_flag = False
@@ -222,24 +211,28 @@ def main(args, ITE=0):
 
             # Training
             loss = train(model, train_loader, optimizer, criterion)
+
             all_loss[iter_] = loss
             all_accuracy[iter_] = accuracy
 
             # Validating
             valid_loss, loss_v = validate(model, valid_loader, optimizer, criterion)
-            all_vloss[iter_] = loss_v
+            all_vloss[iter_] = valid_loss #loss_v
 
             # early stopping
             checkpoint_path = f"{os.getcwd()}/saves/{args.arch_type}/{args.dataset}/"
             save_path = f"{os.getcwd()}/saves/{args.arch_type}/{args.dataset}/{_ite}_model_{args.prune_type}.pth.tar"
-            msg = early_stopping(valid_loss, model, checkpoint_path, save_path)
+            # msg = early_stopping(valid_loss, model, checkpoint_path, save_path)
+            early_stopping(valid_loss, model, checkpoint_path, save_path)
 
             # Frequency for Printing Accuracy and Loss
             if iter_ % args.print_freq == 0:
                 time.sleep(0.25)
                 pbar.set_description(
                     # f'Train Epoch: {iter_}/{args.end_iter} Loss: {loss:.6f} Accuracy: {accuracy:.2f}% Best Accuracy: {best_accuracy:.2f}% \t' + msg)
-                    f'Train Epoch: {iter_}/{args.end_iter} Loss: {loss:.6f} Accuracy: {accuracy:.2f}% Best Accuracy: {best_accuracy:.2f}%')
+                    f'Train Epoch: {iter_}/{args.end_iter} Loss: {loss:.6f} V-Loss: {valid_loss:.6f} Accuracy: {accuracy:.2f}% Best Accuracy: {best_accuracy:.2f}%')
+                if iter_ % 5 == 4:
+                    print('')
 
             if early_stopping.early_stop and not stop_flag:
                 print("Early stopping")
@@ -253,8 +246,8 @@ def main(args, ITE=0):
         # Plotting Loss (Training), Accuracy (Testing), Iteration Curve
         #NOTE Loss is computed for every iteration while Accuracy is computed only for every {args.valid_freq} iterations. Therefore Accuracy saved is constant during the uncomputed iterations.
         #NOTE Normalized the accuracy to [0,100] for ease of plotting.
-        plt.plot(np.arange(1,(args.end_iter)+1), 100*(all_loss - np.min(all_loss))/np.ptp(all_loss).astype(float), c="blue", label="Loss")
-        plt.plot(np.arange(1, (args.end_iter) + 1), 100 * (all_vloss - np.min(all_vloss)) / np.ptp(all_vloss).astype(float), c="green", label="Loss")
+        plt.plot(np.arange(1,(args.end_iter)+1), 100*(all_loss - np.min(all_loss))/np.ptp(all_loss).astype(float), c="blue", label="Train loss")
+        plt.plot(np.arange(1, (args.end_iter) + 1), 100 * (all_vloss - np.min(all_vloss)) / np.ptp(all_vloss).astype(float), c="green", label="Valid loss")
         plt.plot(np.arange(1,(args.end_iter)+1), all_accuracy, c="red", label="Accuracy") 
         plt.title(f"Loss Vs Accuracy Vs Iterations ({args.dataset},{args.arch_type})") 
         plt.xlabel("Iterations") 
@@ -280,6 +273,8 @@ def main(args, ITE=0):
         all_loss = np.zeros(args.end_iter,float)
         all_accuracy = np.zeros(args.end_iter,float)
 
+    print('Training ended~~~')
+
     # Dumping Values for Plotting
     utils.checkdir(f"{os.getcwd()}/dumps/lt/{args.arch_type}/{args.dataset}/")
     comp.dump(f"{os.getcwd()}/dumps/lt/{args.arch_type}/{args.dataset}/{args.prune_type}_compression.dat")
@@ -298,15 +293,24 @@ def main(args, ITE=0):
     utils.checkdir(f"{os.getcwd()}/plots/lt/{args.arch_type}/{args.dataset}/")
     plt.savefig(f"{os.getcwd()}/plots/lt/{args.arch_type}/{args.dataset}/{args.prune_type}_AccuracyVsWeights.png", dpi=1200) 
     plt.close()                    
-   
+
+
 # Function for Training
 def train(model, train_loader, optimizer, criterion):
+    global mask
+    if_prune_by_threshold = False   # True(original) has unexpected behavior
+    if not if_prune_by_threshold:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        tensored_mask = []
+        for i in range(len(mask)):
+            tensored_mask.append(torch.from_numpy(mask[i]).float().to(device))
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     running_loss = 0.0
 
     train_losses = []
-    EPS = 1e-9
+    EPS = 1e-6
     model.train()
     for i, (inputs, labels) in enumerate(train_loader):
         # get the inputs; data is a list of [inputs, labels]
@@ -321,17 +325,25 @@ def train(model, train_loader, optimizer, criterion):
         loss.backward()
 
         # Freezing Pruned weights by making their gradients Zero
-        for name, p in model.named_parameters():
-            if 'weight' in name:
-                tensor = p.data.cpu().numpy()
-                grad_tensor = p.grad.data.cpu().numpy()
-                grad_tensor = np.where(tensor < EPS, 0, grad_tensor)
-                p.grad.data = torch.from_numpy(grad_tensor).to(device)
-        optimizer.step()
+        if if_prune_by_threshold:
+            for name, p in model.named_parameters():
+                if 'weight' in name:
+                    tensor = p.data.cpu().numpy()
+                    grad_tensor = p.grad.data.cpu().numpy()
+                    grad_tensor = np.where(abs(tensor) < EPS, 0, grad_tensor)
+                    p.grad.data = torch.from_numpy(grad_tensor).to(device)
+            optimizer.step()
+        else:
+            step = 0
+            for name, p in model.named_parameters():
+                if 'weight' in name:
+                    p.grad.data = torch.where(tensored_mask[step] < 1, 0*p.grad.data, p.grad.data)
+                    step = step + 1
+            optimizer.step()
 
     return loss.item()
 
-
+    #### Old training  below ####
     # EPS = 1e-6
     # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # model.train()
@@ -363,16 +375,11 @@ def validate(model, valid_loader, optimizer, criterion):
         # get the inputs; data is a list of [inputs, labels]
         inputs, labels = inputs.to(device), labels.to(device)
 
-        # zero the parameter gradients
-        optimizer.zero_grad()
-
         # forward + backward + optimize
         outputs = model(inputs)
         loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
+        valid_losses.append(loss.item())
 
-    valid_losses.append(loss.item())
     valid_loss = np.average(valid_losses)
 
     return valid_loss, loss.item()
@@ -398,82 +405,87 @@ def test(model, test_loader, criterion):
 
 # Prune by Percentile module
 def prune_by_percentile(percent, fc_percent, resample=False, reinit=False, layerwise=False, if_split=True, **kwargs):
-        global step
-        global mask
-        global model
+    global step
+    global mask
+    global model
 
-        # Calculate percentile value
+    # Calculate percentile value
+    step = 0
+    if if_split:
+        # print('yay! lettts split!!')
+        # i won't implement split & layerwise case for now, it's useless
+
+        # split % global case
+        alive_conv = np.empty(shape=0)
+        alive_fc = np.empty(shape=0)  # init 0d array
         step = 0
-        if if_split:
-            # i won't implement split & layerwise case for now, it's useless
+        for name, param in model.named_parameters():
+            if 'weight' in name:
+                tensor = np.multiply(param.data.cpu().numpy(), mask[step])   # this line is edited
+                if 'features' in name:
+                    alive_conv = np.concatenate((alive_conv, tensor[np.nonzero(tensor)]))
+                elif 'classifier' in name:
+                    alive_fc = np.concatenate((alive_fc, tensor[np.nonzero(tensor)]))
+                step = step + 1
+        conv_percentile_value = np.percentile(abs(alive_conv), percent)
+        fc_percentile_value = np.percentile(abs(alive_fc), fc_percent)
+        # print(f'>> conv threshold : {conv_percentile_value:15} (cut from {percent:3}%) | fc threshold : {fc_percentile_value:15} (cut from {fc_percent:3}%)')
 
-            # split % global case
-            alive_conv = np.empty(shape=0)
-            alive_fc = np.empty(shape=0)  # init 0d array
+        # Convert Tensors to numpy and calculate
+        step = 0
+        for name, param in model.named_parameters():
+            if 'weight' in name:
+                tensor = param.data.cpu().numpy()
+                weight_dev = param.device
+                if 'features' in name:
+                    new_mask = np.where(abs(tensor) <= conv_percentile_value, 0, mask[step])
+                elif 'classifier' in name:
+                    new_mask = np.where(abs(tensor) <= fc_percentile_value, 0, mask[step])
+
+                # Apply new weight and mask
+                param.data = torch.from_numpy(tensor * new_mask).to(weight_dev)
+                print(f'  {step:2}th layer sum is {np.sum(new_mask):8}, ')
+                mask[step] = new_mask
+                step += 1
+
+    else:   # use single threshold for pruning conv and FC.
+        if layerwise:
+            for name, param in model.named_parameters():
+
+                # We do not prune bias term
+                if 'weight' in name:
+                    tensor = param.data.cpu().numpy()
+                    alive = tensor[np.nonzero(tensor)] # flattened array of nonzero values
+                    percentile_value = np.percentile(abs(alive), percent)
+
+                    # Convert Tensors to numpy and calculate
+                    weight_dev = param.device
+                    new_mask = np.where(abs(tensor) < percentile_value, 0, mask[step])
+
+                    # Apply new weight and mask
+                    param.data = torch.from_numpy(tensor * new_mask).to(weight_dev)
+                    mask[step] = new_mask
+                    step += 1
+        else:
+            alive = np.empty(shape=0)    # init 0d array
             for name, param in model.named_parameters():
                 if 'weight' in name:
                     tensor = param.data.cpu().numpy()
-                    if 'features' in name:
-                        alive_conv = np.concatenate((alive_conv, tensor[np.nonzero(tensor)]))
-                    elif 'classifier' in name:
-                        alive_fc = np.concatenate((alive_fc, tensor[np.nonzero(tensor)]))
-            conv_percentile_value = np.percentile(abs(alive_conv), percent)
-            fc_percentile_value = np.percentile(abs(alive_fc), fc_percent)
-            # print(f'>> conv threshold : {conv_percentile_value:15} (cut from {percent:3}%) | fc threshold : {fc_percentile_value:15} (cut from {fc_percent:3}%)')
+                    alive = np.concatenate((alive,tensor[np.nonzero(tensor)]))  # flattened array of nonzero values
+            percentile_value = np.percentile(abs(alive), percent)
 
             # Convert Tensors to numpy and calculate
             for name, param in model.named_parameters():
                 if 'weight' in name:
                     tensor = param.data.cpu().numpy()
                     weight_dev = param.device
-                    if 'features' in name:
-                        new_mask = np.where(abs(tensor) <= conv_percentile_value, 0, mask[step])
-                    elif 'classifier' in name:
-                        new_mask = np.where(abs(tensor) <= fc_percentile_value, 0, mask[step])
+                    new_mask = np.where(abs(tensor) < percentile_value, 0, mask[step])
 
                     # Apply new weight and mask
                     param.data = torch.from_numpy(tensor * new_mask).to(weight_dev)
                     mask[step] = new_mask
                     step += 1
-
-        else:   # use single threshold for pruning conv and FC.
-            if layerwise:
-                for name, param in model.named_parameters():
-
-                    # We do not prune bias term
-                    if 'weight' in name:
-                        tensor = param.data.cpu().numpy()
-                        alive = tensor[np.nonzero(tensor)] # flattened array of nonzero values
-                        percentile_value = np.percentile(abs(alive), percent)
-
-                        # Convert Tensors to numpy and calculate
-                        weight_dev = param.device
-                        new_mask = np.where(abs(tensor) < percentile_value, 0, mask[step])
-
-                        # Apply new weight and mask
-                        param.data = torch.from_numpy(tensor * new_mask).to(weight_dev)
-                        mask[step] = new_mask
-                        step += 1
-            else:
-                alive = np.empty(shape=0)    # init 0d array
-                for name, param in model.named_parameters():
-                    if 'weight' in name:
-                        tensor = param.data.cpu().numpy()
-                        alive = np.concatenate((alive,tensor[np.nonzero(tensor)]))  # flattened array of nonzero values
-                percentile_value = np.percentile(abs(alive), percent)
-
-                # Convert Tensors to numpy and calculate
-                for name, param in model.named_parameters():
-                    if 'weight' in name:
-                        tensor = param.data.cpu().numpy()
-                        weight_dev = param.device
-                        new_mask = np.where(abs(tensor) < percentile_value, 0, mask[step])
-
-                        # Apply new weight and mask
-                        param.data = torch.from_numpy(tensor * new_mask).to(weight_dev)
-                        mask[step] = new_mask
-                        step += 1
-        step = 0
+    step = 0
 
 # Function to make an empty mask of the same size as the model
 def make_mask(model):
