@@ -116,15 +116,20 @@ def main(args, ITE=0):
         print("\nWrong Model choice\n")
         exit()
 
-    # Weight Initialization. Warning! This drops test acc, examiniation needed.
-    # model.apply(weight_init)
+    # Weight Initialization. Warning! This drops test acc, so i'm examining this function.
+    model.apply(weight_init)
+
+    # get time for file path
+    import datetime
+    now = datetime.datetime.now()
+    now_ = now.strftime("%02m%02d%02H%02M_")
 
     # Copying and Saving Initial State
     print('  saving initial model... ')
     initial_state_dict = copy.deepcopy(model.state_dict())
-    utils.checkdir(f"{os.getcwd()}/saves/{args.arch_type}/{args.dataset}/")
-    torch.save(model, f"{os.getcwd()}/saves/{args.arch_type}/{args.dataset}/initial_state_dict_{args.prune_type}.pth.tar")
-    print("  initial model saved in ", f"{os.getcwd()}/saves/{args.arch_type}/{args.dataset}/initial_state_dict_{args.prune_type}.pth.tar")
+    utils.checkdir(f"{os.getcwd()}/saves/{now_}{args.arch_type}/{args.dataset}/")
+    torch.save(model, f"{os.getcwd()}/saves/{now_}{args.arch_type}/{args.dataset}/initial_state_dict_{args.prune_type}.pth.tar")
+    print("  initial model saved in ", f"{os.getcwd()}/saves/{now_}{args.arch_type}/{args.dataset}/initial_state_dict_{args.prune_type}.pth.tar")
 
     # Making Initial Mask
     make_mask(model)
@@ -206,8 +211,8 @@ def main(args, ITE=0):
                 if accuracy > best_accuracy:
                     best_accuracy = accuracy
                     # We don't save model per test-acc, will use validation-acc!
-                    # utils.checkdir(f"{os.getcwd()}/saves/{args.arch_type}/{args.dataset}/")
-                    # torch.save(model,f"{os.getcwd()}/saves/{args.arch_type}/{args.dataset}/{_ite}_model_{args.prune_type}.pth.tar")
+                    # utils.checkdir(f"{os.getcwd()}/saves/{now_}{args.arch_type}/{args.dataset}/")
+                    # torch.save(model,f"{os.getcwd()}/saves/{now_}{args.arch_type}/{args.dataset}/{_ite}_model_{args.prune_type}.pth.tar")
 
             # Training
             loss = train(model, train_loader, optimizer, criterion)
@@ -220,8 +225,8 @@ def main(args, ITE=0):
             all_vloss[iter_] = valid_loss #loss_v
 
             # early stopping
-            checkpoint_path = f"{os.getcwd()}/saves/{args.arch_type}/{args.dataset}/"
-            save_path = f"{os.getcwd()}/saves/{args.arch_type}/{args.dataset}/{_ite}_model_{args.prune_type}.pth.tar"
+            checkpoint_path = f"{os.getcwd()}/saves/{now_}{args.arch_type}/{args.dataset}/"
+            save_path = f"{os.getcwd()}/saves/{now_}{args.arch_type}/{args.dataset}/{_ite}_model_{args.prune_type}.pth.tar"
             # msg = early_stopping(valid_loss, model, checkpoint_path, save_path)
             early_stopping(valid_loss, model, checkpoint_path, save_path)
 
@@ -249,23 +254,23 @@ def main(args, ITE=0):
         plt.plot(np.arange(1,(args.end_iter)+1), 100*(all_loss - np.min(all_loss))/np.ptp(all_loss).astype(float), c="blue", label="Train loss")
         plt.plot(np.arange(1, (args.end_iter) + 1), 100 * (all_vloss - np.min(all_vloss)) / np.ptp(all_vloss).astype(float), c="green", label="Valid loss")
         plt.plot(np.arange(1,(args.end_iter)+1), all_accuracy, c="red", label="Accuracy") 
-        plt.title(f"Loss Vs Accuracy Vs Iterations ({args.dataset},{args.arch_type})") 
+        plt.title(f"Loss Vs Accuracy Vs Iterations ({args.dataset},{now_}{args.arch_type})")
         plt.xlabel("Iterations") 
         plt.ylabel("Loss and Accuracy") 
         plt.legend() 
         plt.grid(color="gray") 
-        utils.checkdir(f"{os.getcwd()}/plots/lt/{args.arch_type}/{args.dataset}/")
-        plt.savefig(f"{os.getcwd()}/plots/lt/{args.arch_type}/{args.dataset}/{args.prune_type}_LossVsAccuracy_{comp1}.png", dpi=1200) 
+        utils.checkdir(f"{os.getcwd()}/plots/lt/{now_}{args.arch_type}/{args.dataset}/")
+        plt.savefig(f"{os.getcwd()}/plots/lt/{now_}{args.arch_type}/{args.dataset}/{args.prune_type}_LossVsAccuracy_{comp1}.png", dpi=300)
         plt.close()
 
         # Dump Plot values
-        utils.checkdir(f"{os.getcwd()}/dumps/lt/{args.arch_type}/{args.dataset}/")
-        all_loss.dump(f"{os.getcwd()}/dumps/lt/{args.arch_type}/{args.dataset}/{args.prune_type}_all_loss_{comp1}.dat")
-        all_accuracy.dump(f"{os.getcwd()}/dumps/lt/{args.arch_type}/{args.dataset}/{args.prune_type}_all_accuracy_{comp1}.dat")
+        utils.checkdir(f"{os.getcwd()}/dumps/lt/{now_}{args.arch_type}/{args.dataset}/")
+        all_loss.dump(f"{os.getcwd()}/dumps/lt/{now_}{args.arch_type}/{args.dataset}/{args.prune_type}_all_loss_{comp1}.dat")
+        all_accuracy.dump(f"{os.getcwd()}/dumps/lt/{now_}{args.arch_type}/{args.dataset}/{args.prune_type}_all_accuracy_{comp1}.dat")
         
         # Dumping mask
-        utils.checkdir(f"{os.getcwd()}/dumps/lt/{args.arch_type}/{args.dataset}/")
-        with open(f"{os.getcwd()}/dumps/lt/{args.arch_type}/{args.dataset}/{args.prune_type}_mask_{comp1}.pkl", 'wb') as fp:
+        utils.checkdir(f"{os.getcwd()}/dumps/lt/{now_}{args.arch_type}/{args.dataset}/")
+        with open(f"{os.getcwd()}/dumps/lt/{now_}{args.arch_type}/{args.dataset}/{args.prune_type}_mask_{comp1}.pkl", 'wb') as fp:
             pickle.dump(mask, fp)
         
         # Making variables into 0
@@ -273,26 +278,45 @@ def main(args, ITE=0):
         all_loss = np.zeros(args.end_iter,float)
         all_accuracy = np.zeros(args.end_iter,float)
 
+        # Dumping Values for Plotting
+        utils.checkdir(f"{os.getcwd()}/dumps/lt/{now_}{args.arch_type}/{args.dataset}/")
+        comp.dump(f"{os.getcwd()}/dumps/lt/{now_}{args.arch_type}/{args.dataset}/{args.prune_type}_compression.dat")
+        bestacc.dump(f"{os.getcwd()}/dumps/lt/{now_}{args.arch_type}/{args.dataset}/{args.prune_type}_bestaccuracy.dat")
+
+        # Plotting
+        a = np.arange(args.prune_iterations)
+        plt.plot(a, bestacc, c="blue", label="Winning tickets")
+        plt.title(f"Test Accuracy vs Unpruned Weights Percentage ({args.dataset},{now_}{args.arch_type})")
+        plt.xlabel("Unpruned Weights Percentage")
+        plt.ylabel("test accuracy")
+        plt.xticks(a, comp, rotation ="vertical")
+        plt.ylim(0,100)
+        plt.legend()
+        plt.grid(color="gray")
+        utils.checkdir(f"{os.getcwd()}/plots/lt/{now_}{args.arch_type}/{args.dataset}/")
+        plt.savefig(f"{os.getcwd()}/plots/lt/{now_}{args.arch_type}/{args.dataset}/{args.prune_type}_AccuracyVsWeights.png", dpi=300)
+        plt.close()
+
     print('Training ended~~~')
 
-    # Dumping Values for Plotting
-    utils.checkdir(f"{os.getcwd()}/dumps/lt/{args.arch_type}/{args.dataset}/")
-    comp.dump(f"{os.getcwd()}/dumps/lt/{args.arch_type}/{args.dataset}/{args.prune_type}_compression.dat")
-    bestacc.dump(f"{os.getcwd()}/dumps/lt/{args.arch_type}/{args.dataset}/{args.prune_type}_bestaccuracy.dat")
-
-    # Plotting
-    a = np.arange(args.prune_iterations)
-    plt.plot(a, bestacc, c="blue", label="Winning tickets") 
-    plt.title(f"Test Accuracy vs Unpruned Weights Percentage ({args.dataset},{args.arch_type})") 
-    plt.xlabel("Unpruned Weights Percentage") 
-    plt.ylabel("test accuracy") 
-    plt.xticks(a, comp, rotation ="vertical") 
-    plt.ylim(0,100)
-    plt.legend() 
-    plt.grid(color="gray") 
-    utils.checkdir(f"{os.getcwd()}/plots/lt/{args.arch_type}/{args.dataset}/")
-    plt.savefig(f"{os.getcwd()}/plots/lt/{args.arch_type}/{args.dataset}/{args.prune_type}_AccuracyVsWeights.png", dpi=1200) 
-    plt.close()                    
+    # # Dumping Values for Plotting
+    # utils.checkdir(f"{os.getcwd()}/dumps/lt/{now_}{args.arch_type}/{args.dataset}/")
+    # comp.dump(f"{os.getcwd()}/dumps/lt/{now_}{args.arch_type}/{args.dataset}/{args.prune_type}_compression.dat")
+    # bestacc.dump(f"{os.getcwd()}/dumps/lt/{now_}{args.arch_type}/{args.dataset}/{args.prune_type}_bestaccuracy.dat")
+    #
+    # # Plotting
+    # a = np.arange(args.prune_iterations)
+    # plt.plot(a, bestacc, c="blue", label="Winning tickets")
+    # plt.title(f"Test Accuracy vs Unpruned Weights Percentage ({args.dataset},{now_}{args.arch_type})")
+    # plt.xlabel("Unpruned Weights Percentage")
+    # plt.ylabel("test accuracy")
+    # plt.xticks(a, comp, rotation ="vertical")
+    # plt.ylim(0,100)
+    # plt.legend()
+    # plt.grid(color="gray")
+    # utils.checkdir(f"{os.getcwd()}/plots/lt/{now_}{args.arch_type}/{args.dataset}/")
+    # plt.savefig(f"{os.getcwd()}/plots/lt/{now_}{args.arch_type}/{args.dataset}/{args.prune_type}_AccuracyVsWeights.png", dpi=300)
+    # plt.close()
 
 
 # Function for Training
@@ -444,7 +468,7 @@ def prune_by_percentile(percent, fc_percent, resample=False, reinit=False, layer
 
                 # Apply new weight and mask
                 param.data = torch.from_numpy(tensor * new_mask).to(weight_dev)
-                print(f'  {step:2}th layer sum is {np.sum(new_mask):8}, ')
+                # print(f'  {step:2}th layer sum is {np.sum(new_mask):8}, ')
                 mask[step] = new_mask
                 step += 1
 
@@ -487,6 +511,7 @@ def prune_by_percentile(percent, fc_percent, resample=False, reinit=False, layer
                     step += 1
     step = 0
 
+
 # Function to make an empty mask of the same size as the model
 def make_mask(model):
     global step
@@ -504,6 +529,7 @@ def make_mask(model):
             step = step + 1
     step = 0
 
+
 def original_initialization(mask_temp, initial_state_dict):
     global model
     
@@ -517,6 +543,7 @@ def original_initialization(mask_temp, initial_state_dict):
             param.data = initial_state_dict[name]
     step = 0
 
+
 # Function for Initialization
 def weight_init(m):
     '''
@@ -524,66 +551,87 @@ def weight_init(m):
         model = Model()
         model.apply(weight_init)
     '''
-    if isinstance(m, nn.Conv1d):
-        init.normal_(m.weight.data)
-        if m.bias is not None:
+    # print('init type '+init_type)
+    init_type = "uber"
+
+    if init_type == "rahul":
+        if isinstance(m, nn.Conv1d):
+            init.normal_(m.weight.data)
+            if m.bias is not None:
+                init.normal_(m.bias.data)
+        elif isinstance(m, nn.Conv2d):
+            init.xavier_normal_(m.weight.data)
+            if m.bias is not None:
+                init.normal_(m.bias.data)
+                init.constant(m.bias.data, 0)
+        elif isinstance(m, nn.Conv3d):
+            init.xavier_normal_(m.weight.data)
+            if m.bias is not None:
+                init.normal_(m.bias.data)
+        elif isinstance(m, nn.ConvTranspose1d):
+            init.normal_(m.weight.data)
+            if m.bias is not None:
+                init.normal_(m.bias.data)
+        elif isinstance(m, nn.ConvTranspose2d):
+            init.xavier_normal_(m.weight.data)
+            if m.bias is not None:
+                init.normal_(m.bias.data)
+        elif isinstance(m, nn.ConvTranspose3d):
+            init.xavier_normal_(m.weight.data)
+            if m.bias is not None:
+                init.normal_(m.bias.data)
+        elif isinstance(m, nn.BatchNorm1d):
+            init.normal_(m.weight.data, mean=1, std=0.02)
+            init.constant_(m.bias.data, 0)
+        elif isinstance(m, nn.BatchNorm2d):
+            init.normal_(m.weight.data, mean=1, std=0.02)
+            init.constant_(m.weight.data, 1)
+            init.constant_(m.bias.data, 0)
+        elif isinstance(m, nn.BatchNorm3d):
+            init.normal_(m.weight.data, mean=1, std=0.02)
+            init.constant_(m.bias.data, 0)
+        elif isinstance(m, nn.Linear):
+            init.xavier_normal_(m.weight.data)
             init.normal_(m.bias.data)
-    elif isinstance(m, nn.Conv2d):
-        init.xavier_normal_(m.weight.data)
-        if m.bias is not None:
-            init.normal_(m.bias.data)
-    elif isinstance(m, nn.Conv3d):
-        init.xavier_normal_(m.weight.data)
-        if m.bias is not None:
-            init.normal_(m.bias.data)
-    elif isinstance(m, nn.ConvTranspose1d):
-        init.normal_(m.weight.data)
-        if m.bias is not None:
-            init.normal_(m.bias.data)
-    elif isinstance(m, nn.ConvTranspose2d):
-        init.xavier_normal_(m.weight.data)
-        if m.bias is not None:
-            init.normal_(m.bias.data)
-    elif isinstance(m, nn.ConvTranspose3d):
-        init.xavier_normal_(m.weight.data)
-        if m.bias is not None:
-            init.normal_(m.bias.data)
-    elif isinstance(m, nn.BatchNorm1d):
-        init.normal_(m.weight.data, mean=1, std=0.02)
-        init.constant_(m.bias.data, 0)
-    elif isinstance(m, nn.BatchNorm2d):
-        init.normal_(m.weight.data, mean=1, std=0.02)
-        init.constant_(m.bias.data, 0)
-    elif isinstance(m, nn.BatchNorm3d):
-        init.normal_(m.weight.data, mean=1, std=0.02)
-        init.constant_(m.bias.data, 0)
-    elif isinstance(m, nn.Linear):
-        init.xavier_normal_(m.weight.data)
-        init.normal_(m.bias.data)
-    elif isinstance(m, nn.LSTM):
-        for param in m.parameters():
-            if len(param.shape) >= 2:
-                init.orthogonal_(param.data)
-            else:
-                init.normal_(param.data)
-    elif isinstance(m, nn.LSTMCell):
-        for param in m.parameters():
-            if len(param.shape) >= 2:
-                init.orthogonal_(param.data)
-            else:
-                init.normal_(param.data)
-    elif isinstance(m, nn.GRU):
-        for param in m.parameters():
-            if len(param.shape) >= 2:
-                init.orthogonal_(param.data)
-            else:
-                init.normal_(param.data)
-    elif isinstance(m, nn.GRUCell):
-        for param in m.parameters():
-            if len(param.shape) >= 2:
-                init.orthogonal_(param.data)
-            else:
-                init.normal_(param.data)
+        elif isinstance(m, nn.LSTM):
+            for param in m.parameters():
+                if len(param.shape) >= 2:
+                    init.orthogonal_(param.data)
+                else:
+                    init.normal_(param.data)
+        elif isinstance(m, nn.LSTMCell):
+            for param in m.parameters():
+                if len(param.shape) >= 2:
+                    init.orthogonal_(param.data)
+                else:
+                    init.normal_(param.data)
+        elif isinstance(m, nn.GRU):
+            for param in m.parameters():
+                if len(param.shape) >= 2:
+                    init.orthogonal_(param.data)
+                else:
+                    init.normal_(param.data)
+        elif isinstance(m, nn.GRUCell):
+            for param in m.parameters():
+                if len(param.shape) >= 2:
+                    init.orthogonal_(param.data)
+                else:
+                    init.normal_(param.data)
+
+    elif init_type == "uber":
+        if isinstance(m, nn.Conv1d):
+            init.normal_(m.weight.data)
+            if m.bias is not None:
+                init.normal_(m.bias.data)
+        elif isinstance(m, nn.Conv2d):
+            init.xavier_normal_(m.weight.data)
+            if m.bias is not None:
+                init.constant_(m.bias.data, 0)
+        elif isinstance(m, nn.BatchNorm2d):
+            init.constant_(m.weight.data, 1)
+            init.constant_(m.bias.data, 0)
+
+
 
 
 if __name__=="__main__":
@@ -612,6 +660,8 @@ if __name__=="__main__":
     parser.add_argument("--prune_scope", default="global", type=str, help="global | layerwise")
     parser.add_argument("--split_conv_and_fc", action="store_true", help="use separate prune rate for FC layer")
     parser.add_argument("--fc_prune_percent", default=10, type=int, help="Used only when --split_conv_and_fc==True")
+
+    parser.add_argument("--init_type", default="uber", type=str, help="rahul | uber | pytorch")
 
     
     args = parser.parse_args()
